@@ -1,0 +1,299 @@
+#!/bin/sh
+set -e
+
+usage() { printf "
+Usage: happymeal xsd2code флаги параметры
+       happymeal man
+
+Сommand:
+  xsd2code Генерация кода классов на основе схем данных и его тестирование.
+    Генерация делается в 4 прохода
+    а) первым проходом собираем все схемы указанные в параметрах в один файл.
+       Добавляем в узлы элементов атрибуты необходимые для построения классов.
+       выполняет сборку скрипт 'consolidate_xsd2xml.php' на выходе скрипта
+       формируется временный файл '../happymeal_build_tmp/consolidated.xml'
+    б) формируем единый файл с кодом путем трансформации
+       '../happymeal_build_tmp/consolidated.xml' с использованием xslt шаблонов
+       расположенных в файле 'stylesheets/xsd2classes.xsl' на выходе получаем
+       временный текстовый файл '../happymeal_build_tmp/classes.txt' который
+       содержит php и указатели на файлы классов
+    в) парсим полученный текстовый файл '../happymeal_build_tmp/classes.txt' и
+       формируем файлы с классами, записываем файлы классов в соответствующие
+       папки
+    г) из файла '../happymeal_build_tmp/consolidated.xml' путем трансформации
+       шаблонами 'stylesheets/xsd2tests.xsl' формируем файл
+       '../happymeal_build/xsd2code_tests.php', который содержит исполняемый код
+       тестов (пока частично реализованы тесты простых типов). Выполняем
+       полученный файл.
+
+  флаги:
+    -v
+       создание классов валидаторов
+    -t 
+       создание скрипта тестов сгенерированных классов
+    -j 
+       создание js адапторов
+    -m пространство имен
+       задает пространство имен для генерируемых классов.
+    -s путь
+       путь к папке с файлами схем (по умолчанию ../web/schemas)
+    -o путь
+       путь к папке с файлами создаваемых классов (по умолчанию ../generated)
+
+  параметры:
+    путь [путь ...]
+       папки или отдельные файлы схем данных.
+       Сссылка на файл дается относительно папки (-s путь)
+       например 'ContactsHistory/Event.xsd', или 'ContactsHistory'
+
+  пример:
+    happymeal xsd2code -m ARM\\Port\\Adaptor\\Data /ContactsHistory/Event.xsd
+       создает классы адапторов данных
+    happymeal xsd2code -vtm ARM\\Port\\Adaptor\\Data /ContactsHistory/Event.xsd
+       создает классы адапторов, валидаторы к ним и тестовый скрипт.
+
+Command:
+  wadl2code Генерируем код скрипта роутера по данным wadl.
+    Проверяет все файлы *.wadl в папке (-s путь). Если вторым параметром
+    указывается конкретный файл схемы, то генерирует только по нему
+    использует для версионности скрипта путь /api/v[0-9]{1,2}\.[0-9]{1,2}
+    base ресурсов wadl файла.
+    генерируется файл api.v[0-9]{1,2}-[0-9]{1,2}.php в каталоге web
+
+
+" 1>&2; exit 1; }
+
+#  подчищаем
+#trap 'rm -rf -- ../happymeal_build/tmp' EXIT
+
+command=$1
+if [ -z "${command}" ]; then
+    usage
+fi
+
+f="/dev/null"
+mkfile() {
+	f=$2
+	mkdir -p `dirname $f`
+	echo -n >$f
+}
+
+sFlag=
+oFlag=
+invokePath=$(pwd)
+tmpBuildDir="${invokePath}/happymeal_build_tmp"
+happymealPath=$(dirname $(realpath $(readlink $0||echo $0)))
+
+if [ "$command" == "xsd2code" ]; then
+
+	tFlag=
+	mFlag=
+	vFlag="WITHOUT_VALIDATORS"
+	jFlag=
+
+	OPTIND=2
+	while getopts ":m:vtjs:o:" optname
+		do
+		case "$optname" in
+			m)	mFlag=$OPTARG
+				;;
+      v)  vFlag="WITH_VALIDATORS" 
+       	;;
+			t)  tFlag=1
+				;;
+			j)  jFlag=1
+				;;
+			s)	sFlag=$(realpath $OPTARG)
+				;;
+			o)	oFlag=$(realpath $OPTARG)
+				;;
+			:)	echo "Option -$OPTARG requires an argument" >&2
+				exit 1
+				;;
+			?)	echo "Unknown option -$OPTARG" >&2
+				exit 1
+				;;
+			*)	echo "Unknown error while processing options" >&2
+				exit 1
+		esac
+	done
+	shift $((OPTIND-1))
+	
+	if [ -z "${mFlag}" ]; then
+		usage
+	fi
+
+	cd "$happymealPath"
+
+	if [ -z "$sFlag" ]; then
+		sFlag=$(realpath "../web/schemas")
+	fi
+	if [ -z "$oFlag" ]; then
+		oFlag=$(realpath "../generated")
+	fi
+	if [ ! -d "$sFlag" ]; then
+		echo "Ошибка: не найден каталог схем" >&2
+		exit 1
+	fi
+
+	mkdir -p "$oFlag"
+	mkdir -p "$tmpBuildDir"
+	# каталог классов не чистим
+	rm -rf "$tmpBuildDir"/*
+
+	php -d error_log=/dev/stderr consolidate_xsd2xml2.php "$mFlag" "$sFlag" "$oFlag" $* > "$tmpBuildDir"/consolidated.xml
+	
+	echo "consolidate xsd schemas ...    OK!"
+	echo $vFlag
+	xsltproc --stringparam MODE "$vFlag" stylesheets/xsd2classes3.xsl "$tmpBuildDir"/consolidated.xml > "$tmpBuildDir"/classes.txt
+	echo >>"$tmpBuildDir"/classes.txt
+	echo "xsd to classes code ...        OK!"
+
+	cat "$tmpBuildDir"/classes.txt | while IFS= read -r s; do
+		if [[ "$s" = "#path:"* ]] ; then
+			mkfile $s
+		else
+			echo "$s" >>$f
+		fi
+	done
+	echo "classes code to files ...       OK!"
+
+	if [ "${tFlag}" == 1 ]; then
+		xsltproc stylesheets/xsd2tests2.xsl "$tmpBuildDir"/consolidated.xml > "$tmpBuildDir"/xsd2code_tests.php
+		php -d error_log=/dev/stderr "$tmpBuildDir"/xsd2code_tests.php "$oFlag"
+	fi
+	
+	if [ "${jFlag}" == 1 ]; then
+		mkdir -p "$oFlag"/web/js/libs
+		jValue=${mFlag//\\/.}
+		xsltproc stylesheets/xsd2js.xsl "$tmpBuildDir"/consolidated.xml > "$oFlag"/web/js/${jValue}.js
+		cp -p web/js/Happymeal.js "$oFlag"/web/js/Happymeal.js
+		cp -R web/js/libs/sax.js "$oFlag"/web/js/libs
+	fi
+	
+	#chmod -R 777 "$oValue"
+	rm -rf "$tmpBuildDir"
+	cd "$invokePath"
+	exit 0;
+	
+elif [ "$command" == "wadl2code" ]; then
+
+	OPTIND=2
+	while getopts ":s:o:" optname
+		do
+		case "$optname" in
+			s)	sFlag=$(realpath $OPTARG)
+				;;
+			o)	oFlag=$(realpath $OPTARG)
+				;;
+			:)	echo "Option -$OPTARG requires an argument" >&2
+				exit 1
+				;;
+			?)	echo "Unknown option -$OPTARG" >&2
+				exit 1
+				;;
+			*)	echo "Unknown error while processing options" >&2
+				exit 1
+		esac
+	done
+	shift $((OPTIND-1))
+
+	cd "$happymealPath"
+
+	if [ -z "$sFlag" ]; then
+		sFlag=$(realpath "../web/schemas")
+	fi
+	if [ -z "$oFlag" ]; then
+		oFlag=$(realpath "../generated")
+	fi
+	if [ ! -d "$sFlag" ]; then
+		echo "Ошибка: не найден каталог схем" >&2
+		exit 1
+	fi
+	if [ ! -d "$oFlag" ]; then
+		echo "Ошибка: не найден каталог классов" >&2
+		exit 1
+	fi
+
+	mkdir -p "$tmpBuildDir"
+	rm -rf "$tmpBuildDir"/*
+
+	find "$sFlag"/$2 -type f -name *.wadl | while read j; do
+		# манипуляции с исходным wadl
+		# заменим ссылки на требуемый для роутера формат {var} меняем на :p
+		cat $j | sed -e "s/{\([a-zA-Z0-9]*\)}/:\1/g" > "$tmpBuildDir"/wadl.xml
+		cat $j | grep "xmlns:" | while read ns; do
+		# Не используем для подмены обычные пространства имен
+			if [[ ! $ns =~ http ]]; then
+				# нашли префикс
+				pref=$(echo "$ns" | sed -e 's/^xmlns:\([a-z0-9]*\)=.*/\1/')
+				# выкусили пространство имен
+				namespace=$( echo "$ns" | sed -e 's/^[^"]*"//; s/".*//')
+				# подменили префикс пространством в узле representation
+				sed -i -e "s/element=\"${pref}\:/element=\"${namespace}\:/g"  "$tmpBuildDir"/wadl.xml
+			fi
+		done
+		# выкусим номер версии api и составим по нему имя скрипта который связан с этой версией
+		# версии в адресах записываются таким образом .../api/v[1-9]\.[0-9]{1,2}/... превращаем это в файл api\.v{0-9}-{0-9}{1,2}.php
+		base=$( cat $j | grep "resources *base" | sed -e 's/^[^"]*"//; s/".*//' )
+		if [[ $base =~ api(\/v[0-9]{1,2}\.[0-9]{1,2}\/)? ]] ; then
+			api=$( echo $base | sed -e 's/.*\(api\)/\1/; s/\/$//' | tr "." "-" | tr "/" "." )".php"
+			xsltproc --stringparam WADL ${j/#*web} --stringparam API $api --stringparam OUTDIR "$oFlag" stylesheets/wadl2code.xsl "$tmpBuildDir"/wadl.xml  > "$tmpBuildDir"/wadl2code.txt
+			cat "$tmpBuildDir"/wadl2code.txt | while IFS= read -r s; do
+				if [[ "$s" = "#path:"* ]] ; then
+					mkfile $s
+				else
+					echo "$s" >>$f
+				fi
+			done
+			echo "wadl code to files ...       OK!"
+		fi
+	done
+
+	rm -rf "$tmpBuildDir"
+	cd "$invokePath"
+	exit 0;
+
+elif [ "$command" == "man" ]; then
+	printf "
+*****************************************************************************
+
+Генератор xml адаптеров для данных. Основан на XMLSchemas.(тестовый режим)
+
+1. Установка в проект
+Генератор может быть установлен проект через svn:externals. Для этого в корне
+проекта   через propedit/propset  прописывается  ссылка  на проект  happymeal
+расположенный          https://svn.net.ilb.ru/repos/happymeal/trunk/happymeal
+
+2. Генерация кода
+Скрипты   для   генерации   кода   находятся   в   корне   проекта happymeal.
+Исполняемый   батник   happymeal.  Для генерации года вызывается в таком виде
+
+        ./happymeal xsd2code -m Classes\\Name\\Spaces path/to/schemas
+
+(можно посмотреть usage). Путь к схемам указывается  относительно  каталога
+web/schemas, например, workflow  или workflow/xpil.xsd Схемы даных должны
+уже быть в этом каталоге.
+Батник отработает и создаст в корне проекта директорию happymeal_build. В этой
+директории будет директория с созданными классами classes.
+Если при запуске батника указывается -v флаг, то в этом случае построение классов
+адапторов происходит с построением классов валидаторов. Пример использования:
+
+        ./happymeal xsd2code -vm Classes\\Name\\Spaces path/to/schemas
+
+3. Подключение классов
+Сгенерированные классы следует скопировать в свой проект. Кроме этого следует
+внести изменения в bootstrap проекта. Изменения касаются следующего:
+
+во первых, сгенерированные классы основаны на пространствах имен, а не на
+разделителях '_';
+во вторых, там в самом проекте happymeal есть базовые классы для типов схемы
+и валидаторов. Чтобы сгенерированные классы работали, необходимо указать путь
+до них.
+
+******************************************************************************\n"
+
+	exit 0;
+else
+	usage
+fi
