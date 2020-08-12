@@ -1,0 +1,2 @@
+mkdir -p TestApp/DocumentListRequest
+xsd2php  convert:php --ns-map 'urn:ru:ilb:meta:TestApp:DocumentListRequest;TestApp/DocumentListRequest/' --ns-dest 'TestApp/DocumentListRequest/;TestApp/DocumentListRequest' schemas/DocumentListRequest.xsd

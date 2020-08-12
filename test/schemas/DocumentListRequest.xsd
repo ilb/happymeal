@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Схема входных данных (запроса) -->
+<xsd:schema elementFormDefault="qualified" xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+            xmlns="urn:ru:ilb:meta:TestApp:DocumentListRequest"
+            targetNamespace="urn:ru:ilb:meta:TestApp:DocumentListRequest">
+    <xsd:element name="DocumentListRequest">
+        <xsd:complexType>
+            <xsd:annotation>
+                <xsd:documentation>Получить список документов</xsd:documentation>
+            </xsd:annotation>
+            <xsd:sequence>
+                <xsd:element name="dateStart" type="xsd:date">
+                    <xsd:annotation>
+                        <xsd:documentation>Дата начала периода</xsd:documentation>
+                    </xsd:annotation>
+                </xsd:element>
+                <xsd:element name="dateEnd" type="xsd:date">
+                    <xsd:annotation>
+                        <xsd:documentation>Дата окончания периода</xsd:documentation>
+                    </xsd:annotation>
+                </xsd:element>
+                <xsd:element name="outputFormat" minOccurs="0" default="html">
+                    <xsd:annotation>
+                        <xsd:documentation>Формат выводимых данных</xsd:documentation>
+                    </xsd:annotation>
+                    <xsd:simpleType>
+                        <xsd:restriction base="xsd:string">
+                            <xsd:enumeration value="html"/>
+                            <xsd:enumeration value="ods"/>
+                            <xsd:enumeration value="pdf"/>
+                        </xsd:restriction>
+                    </xsd:simpleType>
+                </xsd:element>
+            </xsd:sequence>
+        </xsd:complexType>
+    </xsd:element>
+</xsd:schema>
