@@ -4,4 +4,5 @@ rm -rf ./generated
 happymeal-1 xsd2code \
 -m ru\\ilb \
 -o ./generated \
--s ./schemas
+-s ./schemas \
+DocumentListRequest.xsd
